@@ -2,7 +2,8 @@
    Weather Now – Service Worker
    =========================== */
 
-// Bump on each deploy to bust stale cached assets\nconst CACHE_NAME = 'wx-cache-v1';
+// Bump on each deploy to bust stale cached assets
+const CACHE_NAME = 'wx-cache-v2';
 
 const STATIC_ASSETS = [
     './',
@@ -74,8 +75,9 @@ async function cacheFirst(request) {
     try {
         const response = await fetch(request);
         if (response.ok) {
-            const cache = await caches.open(CACHE_NAME);
-            cache.put(request, response.clone());
+            caches.open(CACHE_NAME)
+                .then(cache => cache.put(request, response.clone()))
+                .catch(() => {});
         }
         return response;
     } catch {
@@ -87,8 +89,9 @@ async function networkFirst(request) {
     try {
         const response = await fetch(request);
         if (response.ok) {
-            const cache = await caches.open(CACHE_NAME);
-            cache.put(request, response.clone());
+            caches.open(CACHE_NAME)
+                .then(cache => cache.put(request, response.clone()))
+                .catch(() => {});
         }
         return response;
     } catch {
