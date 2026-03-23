@@ -1,0 +1,23 @@
+{
+  "name": "Weather Now",
+  "short_name": "Weather",
+  "description": "A fast, beautiful weather app powered by Open-Meteo.",
+  "start_url": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "theme_color": "hsl(243, 96%, 9%)",
+  "background_color": "hsl(243, 96%, 9%)",
+  "icons": [
+    {
+      "src": "./assets/images/favicon-32x32.png",
+      "sizes": "32x32",
+      "type": "image/png"
+    },
+    {
+      "src": "./assets/images/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"> <!-- displays site properly based on user's device -->
+
+  <link rel="icon" type="image/png" sizes="32x32" href="./assets/images/favicon-32x32.png">
+  
+  <title>Weather Now</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="hsl(243, 96%, 9%)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+</head>
+<body>
+  <div id="app">
+
+    <!-- Header -->
+    <header class="header">
+      <a href="/" class="logo" aria-label="Weather Now home">
+        <img src="./assets/images/logo.svg" alt="" width="32" height="32">
+        <span>Weather Now</span>
+      </a>
+
+      <div class="header-actions">
+        <!-- Compare Button -->
+        <button class="compare-btn" id="compareBtn" hidden>
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="18"/><rect x="14" y="3" width="7" height="18"/></svg>
+          Compare
+        </button>
+
+        <!-- Theme Toggle -->
+        <button class="theme-toggle-btn" id="themeToggleBtn" aria-label="Toggle light/dark theme">
+          <span class="theme-icon-sun" aria-hidden="true">☀️</span>
+          <span class="theme-icon-moon" aria-hidden="true">🌙</span>
+        </button>
+
+        <!-- Units Dropdown -->
+        <div class="units-container" id="unitsContainer">
+          <button class="units-btn" id="unitsBtn" aria-expanded="false" aria-haspopup="true">
+            <img src="./assets/images/icon-units.svg" alt="" aria-hidden="true" width="18" height="18">
+            <span>Units</span>
+            <img src="./assets/images/icon-dropdown.svg" alt="" aria-hidden="true" class="units-chevron" width="14" height="14">
+          </button>
+
+          <div class="units-panel" id="unitsPanel" hidden>
+            <button class="switch-units-btn" id="switchUnitsBtn">Switch to Imperial</button>
+
+            <div class="units-group">
+              <p class="units-group-label">Temperature</p>
+              <button class="unit-item" data-group="temp" data-value="celsius">
+                Celsius (°C)
+                <img src="./assets/images/icon-checkmark.svg" alt="" class="checkmark-icon" width="16" height="16">
+              </button>
+              <button class="unit-item" data-group="temp" data-value="fahrenheit">
+                Fahrenheit (°F)
+                <img src="./assets/images/icon-checkmark.svg" alt="" class="checkmark-icon" width="16" height="16">
+              </button>
+            </div>
+
+            <div class="units-group">
+              <p class="units-group-label">Wind Speed</p>
+              <button class="unit-item" data-group="wind" data-value="kmh">
+                km/h
+                <img src="./assets/images/icon-checkmark.svg" alt="" class="checkmark-icon" width="16" height="16">
+              </button>
+              <button class="unit-item" data-group="wind" data-value="mph">
+                mph
+                <img src="./assets/images/icon-checkmark.svg" alt="" class="checkmark-icon" width="16" height="16">
+              </button>
+            </div>
+
+            <div class="units-group">
+              <p class="units-group-label">Precipitation</p>
+              <button class="unit-item" data-group="precip" data-value="mm">
+                Millimeters (mm)
+                <img src="./assets/images/icon-checkmark.svg" alt="" class="checkmark-icon" width="16" height="16">
+              </button>
+              <button class="unit-item" data-group="precip" data-value="inches">
+                Inches (in)
+                <img src="./assets/images/icon-checkmark.svg" alt="" class="checkmark-icon" width="16" height="16">
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main -->
+    <main class="main-content">
+
+      <!-- Error State -->
+      <div class="error-state" id="errorState" hidden>
+        <img src="./assets/images/icon-error.svg" alt="" class="error-icon" aria-hidden="true">
+        <h1 class="error-heading">Something went wrong</h1>
+        <p class="error-subtext">We couldn't connect to the server (API error). Please try again in a few moments.</p>
+        <button class="retry-btn" id="retryBtn">
+          <img src="./assets/images/icon-retry.svg" alt="" aria-hidden="true" width="18" height="18">
+          Retry
+        </button>
+      </div>
+
+      <!-- Normal Content (all non-error states) -->
+      <div class="normal-content" id="normalContent">
+        <h1 class="page-heading">How's the sky looking today?</h1>
+
+        <!-- Search -->
+        <div class="search-container">
+          <div class="search-bar">
+            <div class="search-input-group">
+              <img src="./assets/images/icon-search.svg" alt="" class="search-icon" aria-hidden="true" width="20" height="20">
+              <label for="searchInput" class="sr-only">Search for a city</label>
+              <input
+                type="text"
+                id="searchInput"
+                class="search-input"
+                placeholder="Search for a place..."
+                autocomplete="off"
+                aria-expanded="false"
+                aria-controls="searchDropdown"
+                aria-autocomplete="list"
+              >
+              <!-- Voice search button -->
+              <button class="voice-btn" id="voiceBtn" aria-label="Search by voice" hidden>
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+              </button>
+              <div class="search-dropdown" id="searchDropdown" role="listbox" hidden></div>
+            </div>
+            <button class="search-submit-btn" id="searchBtn">Search</button>
+          </div>
+          <!-- Geolocation button (visible in initial state) -->
+          <button class="geo-btn" id="geoBtn">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="9" opacity=".3"/></svg>
+            Use my location
+          </button>
+          <!-- Favorites Row -->
+          <div class="favorites-row" id="favoritesRow" hidden></div>
+        </div>
+
+        <!-- No Results Message -->
+        <p class="no-results-msg" id="noResultsMsg" hidden>No search result found!</p>
+
+        <!-- Weather Content -->
+        <div class="weather-wrapper" id="weatherWrapper" hidden>
+          <div class="weather-grid">
+
+            <!-- Left Column -->
+            <div class="left-col">
+
+              <!-- Today Card -->
+              <div class="today-card">
+                <div class="today-card-inner">
+                  <div class="today-loading" id="todayLoading">
+                    <div class="loading-dots" aria-label="Loading weather data">
+                      <span></span><span></span><span></span>
+                    </div>
+                    <p>Loading...</p>
+                  </div>
+                  <div class="today-data" id="todayData" hidden>
+                    <div class="today-left">
+                      <h2 class="city-name" id="cityName"></h2>
+                      <p class="current-date" id="currentDate"></p>
+                    </div>
+                    <div class="today-right">
+                      <img class="main-weather-icon" id="mainWeatherIcon" src="" alt="">
+                      <p class="main-temp" id="mainTemp"></p>
+                    </div>
+                    <!-- Favorite button -->
+                    <button class="favorite-btn" id="favoriteBtn" aria-label="Save to favorites">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Stats -->
+              <div class="stats-grid">
+                <div class="stat-card">
+                  <p class="stat-label">Feels Like</p>
+                  <p class="stat-value" id="statFeelsLike">—</p>
+                </div>
+                <div class="stat-card">
+                  <p class="stat-label">Humidity</p>
+                  <p class="stat-value" id="statHumidity">—</p>
+                </div>
+                <div class="stat-card">
+                  <p class="stat-label">Wind</p>
+                  <p class="stat-value" id="statWind">—</p>
+                </div>
+                <div class="stat-card">
+                  <p class="stat-label">Precipitation</p>
+                  <p class="stat-value" id="statPrecip">—</p>
+                </div>
+                <div class="stat-card">
+                  <p class="stat-label">UV Index</p>
+                  <p class="stat-value" id="statUV">—</p>
+                </div>
+                <div class="stat-card">
+                  <p class="stat-label">Visibility</p>
+                  <p class="stat-value" id="statVisibility">—</p>
+                </div>
+                <div class="stat-card">
+                  <p class="stat-label">Pressure</p>
+                  <p class="stat-value" id="statPressure">—</p>
+                </div>
+              </div>
+
+              <!-- Sunrise / Sunset -->
+              <div class="sun-row" id="sunRow" hidden>
+                <div class="sun-item">
+                  <span class="sun-emoji" aria-hidden="true">🌅</span>
+                  <span class="sun-label">Sunrise</span>
+                  <span class="sun-value" id="statSunrise">—</span>
+                </div>
+                <div class="sun-divider"></div>
+                <div class="sun-item">
+                  <span class="sun-emoji" aria-hidden="true">🌇</span>
+                  <span class="sun-label">Sunset</span>
+                  <span class="sun-value" id="statSunset">—</span>
+                </div>
+              </div>
+
+              <!-- Daily Forecast -->
+              <div class="daily-section">
+                <h3 class="section-title">Daily forecast</h3>
+                <div class="daily-list" id="dailyList" aria-label="7-day forecast"></div>
+              </div>
+
+            </div><!-- /left-col -->
+
+            <!-- Right Column: Hourly -->
+            <div class="right-col">
+              <div class="hourly-panel">
+                <div class="hourly-header">
+                  <h3 class="section-title">Hourly forecast</h3>
+                  <div class="day-picker" id="dayPickerContainer">
+                    <button class="day-picker-btn" id="dayPickerBtn" aria-expanded="false" aria-haspopup="listbox">
+                      <span id="dayPickerLabel">—</span>
+                      <img src="./assets/images/icon-dropdown.svg" alt="" aria-hidden="true" width="14" height="14" class="day-picker-chevron">
+                    </button>
+                    <div class="day-picker-menu" id="dayPickerMenu" role="listbox" hidden></div>
+                  </div>
+                </div>
+                <div class="hourly-list" id="hourlyList" aria-label="Hourly forecast"></div>
+              </div>
+            </div><!-- /right-col -->
+
+          </div><!-- /weather-grid -->
+        </div><!-- /weather-wrapper -->
+
+      </div><!-- /normal-content -->
+
+      <!-- Compare View -->
+      <div class="compare-view" id="compareView" hidden>
+        <div class="compare-header">
+          <h2 class="compare-title">Compare Locations</h2>
+          <button class="compare-close-btn" id="compareCloseBtn">← Back</button>
+        </div>
+        <div class="compare-grid" id="compareGrid"></div>
+        <div class="compare-add-row" id="compareAddRow">
+          <div class="compare-search-bar">
+            <img src="./assets/images/icon-search.svg" alt="" aria-hidden="true" width="18" height="18">
+            <label for="compareSearchInput" class="sr-only">Add a location to compare</label>
+            <input type="text" id="compareSearchInput" class="compare-search-input" placeholder="Add a location…" autocomplete="off">
+            <div class="search-dropdown" id="compareSearchDropdown" role="listbox" hidden></div>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div><!-- /app -->
+
+  <div class="attribution">
+    Challenge by <a href="https://www.frontendmentor.io" target="_blank" rel="noopener noreferrer">Frontend Mentor</a>.
+    Coded by <a href="#">Your Name</a>.
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
