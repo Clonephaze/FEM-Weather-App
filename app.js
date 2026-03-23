@@ -46,9 +46,9 @@ let selectedDayIndex = 0;
 let _lastLocation = null; // used when returning from compare view
 
 const units = {
-  temp:   'celsius',    // celsius | fahrenheit
-  wind:   'kmh',        // kmh | mph
-  precip: 'mm',         // mm | inches
+  temp:   'fahrenheit',  // celsius | fahrenheit
+  wind:   'mph',         // kmh | mph
+  precip: 'inches',      // mm | inches
 };
 
 // ---- COMPARE ----
@@ -151,6 +151,17 @@ function precipUnit() { return units.precip === 'inches' ? ' in' : ' mm'; }
 /* ===========================
    DATE / TIME HELPERS
    =========================== */
+let _devNightOverride = null; // null=auto, true=force night, false=force day
+
+function isDayTime() {
+  if (_devNightOverride !== null) return !_devNightOverride;
+  if (!weatherData?.daily?.sunrise?.[0]) return true;
+  const now  = new Date();
+  const rise = new Date(weatherData.daily.sunrise[0]);
+  const set  = new Date(weatherData.daily.sunset[0]);
+  return now >= rise && now <= set;
+}
+
 function formatCardDate(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number);
   return new Date(y, m - 1, d).toLocaleDateString('en-US', {
@@ -398,6 +409,12 @@ function renderWeather() {
   const bgClasses = ['bg-sunny','bg-partly-cloudy','bg-cloudy','bg-rainy','bg-snowy','bg-stormy','bg-foggy'];
   todayCard.classList.remove(...bgClasses);
   todayCard.classList.add(wx.bg);
+  const isNight = !isDayTime();
+  todayCard.classList.toggle('is-night', isNight);
+
+  // Start particle effects
+  startParticles(wx.bg, current.weather_code, isNight);
+  _particleRO.observe(todayCard);
 
   // City + date
   cityName.textContent    = [locationData.name, locationData.country].filter(Boolean).join(', ');
@@ -406,29 +423,43 @@ function renderWeather() {
   // Temp / icon
   mainWeatherIcon.src     = `./assets/images/${wx.icon}`;
   mainWeatherIcon.alt     = wx.label;
-  mainTemp.textContent    = `${cvtTemp(current.temperature_2m)}°`;
 
-  // Core stats
-  statFeelsLike.textContent  = `${cvtTemp(current.apparent_temperature)}°`;
-  statHumidity.textContent   = `${current.relative_humidity_2m}%`;
-  statWind.textContent       = `${cvtWind(current.wind_speed_10m)}${windUnit()}`;
-  statPrecip.textContent     = `${cvtPrecip(current.precipitation)}${precipUnit()}`;
-  statPressure.textContent   = cvtPressure(current.surface_pressure);
+  // Animate the main temperature counting up
+  const tempTarget = `${cvtTemp(current.temperature_2m)}°`;
+  animateValue(mainTemp, tempTarget, 800);
 
-  // UV + Visibility — find the nearest hourly slot
+  // Float the weather icon
+  mainWeatherIcon.classList.add('anim-float');
+
+  // Animate stat values counting up with stagger
+  const statEntries = [
+    [statFeelsLike,  `${cvtTemp(current.apparent_temperature)}°`],
+    [statHumidity,   `${current.relative_humidity_2m}%`],
+    [statWind,       `${cvtWind(current.wind_speed_10m)}${windUnit()}`],
+    [statPrecip,     `${cvtPrecip(current.precipitation)}${precipUnit()}`],
+    [statPressure,   cvtPressure(current.surface_pressure)],
+  ];
+
+  // UV + Visibility
   const nowIdx = (() => {
-    const nowIso = new Date().toISOString().slice(0, 13); // "2025-08-05T15"
+    const nowIso = new Date().toISOString().slice(0, 13);
     const found  = hourly.time.findIndex(t => t.startsWith(nowIso));
     return found >= 0 ? found : 0;
   })();
-  statUV.textContent         = uvLabel(hourly.uv_index?.[nowIdx]);
-  statVisibility.textContent = cvtVisibility(hourly.visibility?.[nowIdx] ?? 0);
+  statEntries.push([statUV, uvLabel(hourly.uv_index?.[nowIdx])]);
+  statEntries.push([statVisibility, cvtVisibility(hourly.visibility?.[nowIdx] ?? 0)]);
+
+  statEntries.forEach(([el, text], i) => {
+    el.style.setProperty('--stagger', `${200 + i * 80}ms`);
+    animateValue(el, text, 600);
+  });
 
   // Sunrise / sunset
   if (daily.sunrise?.[0]) {
     statSunrise.textContent = formatTime(daily.sunrise[0]);
     statSunset.textContent  = formatTime(daily.sunset[0]);
     sunRow.hidden = false;
+    animateIn([sunRow], 600);
   }
 
   // Favorite star
@@ -438,6 +469,28 @@ function renderWeather() {
   renderDayPicker(daily);
   renderHourlyForecast(selectedDayIndex);
   renderFavoritesRow();
+
+  // Orchestrate entrance animations with stagger
+  requestAnimationFrame(() => {
+    // Today card slides in first
+    animateIn([todayCard], 0);
+
+    // Stat cards stagger in
+    const statCards = document.querySelectorAll('.stat-card');
+    animateIn(statCards, 100, 60);
+
+    // Daily cards pop in
+    const dayCards = document.querySelectorAll('.day-card');
+    animateIn(dayCards, 250, 50);
+
+    // Hourly items slide from left
+    const hourlyItems = document.querySelectorAll('.hourly-item');
+    animateIn(hourlyItems, 350, 30);
+
+    // Hourly panel
+    const hourlyPanel = document.querySelector('.hourly-panel');
+    if (hourlyPanel) animateIn([hourlyPanel], 200);
+  });
 }
 
 function renderDailyForecast(daily) {
@@ -502,9 +555,761 @@ function renderHourlyForecast(dayIndex) {
 }
 
 /* ===========================
-   ANIMATED BACKGROUND
-   (handled via CSS classes added in renderWeather)
+   ANIMATION ORCHESTRATOR
    =========================== */
+
+/**
+ * Stagger-animate a list of elements with the `.anim-in` class.
+ * @param {NodeList|Element[]} els  - elements to animate
+ * @param {number} baseDelay       - ms before first element animates
+ * @param {number} stagger         - ms between each element
+ */
+function animateIn(els, baseDelay = 0, stagger = 60) {
+  const list = els instanceof NodeList ? [...els] : els;
+  list.forEach((el, i) => {
+    el.classList.remove('anim-in');
+    el.classList.add('anim-ready');
+    // Force reflow so re-triggering works
+    void el.offsetWidth;
+    el.style.setProperty('--stagger', `${baseDelay + i * stagger}ms`);
+    el.classList.remove('anim-ready');
+    el.classList.add('anim-in');
+  });
+}
+
+/**
+ * Animate a number counting up (or changing) from current to target.
+ * Uses requestAnimationFrame for buttery 60fps.
+ */
+function animateValue(el, targetText, durationMs = 600) {
+  // Extract leading number from target text, e.g. "23°" → 23, "4.2 mm" → 4.2
+  const match = targetText.match(/^(-?\d+\.?\d*)/);
+  if (!match) {
+    el.textContent = targetText;
+    el.classList.add('anim-count');
+    return;
+  }
+  const targetNum = parseFloat(match[1]);
+  const suffix    = targetText.slice(match[0].length);
+  const isFloat   = targetText.includes('.');
+  const startNum  = 0;
+  const startTime = performance.now();
+
+  el.classList.add('anim-count');
+
+  function tick(now) {
+    const elapsed  = now - startTime;
+    const progress = Math.min(elapsed / durationMs, 1);
+    // Ease-out quint
+    const eased = 1 - Math.pow(1 - progress, 5);
+    const current = startNum + (targetNum - startNum) * eased;
+    el.textContent = (isFloat ? current.toFixed(1) : Math.round(current)) + suffix;
+    if (progress < 1) requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
+/* ===========================
+   WEATHER PARTICLE SYSTEM
+   Canvas-based weather effects with intensity levels
+   =========================== */
+let _particleCanvas = null;
+let _particleCtx    = null;
+let _particleAnimId = null;
+let _particles      = [];
+let _particleType   = '';
+let _particleCode   = 0;
+let _particleTime   = 0;
+
+function initParticleCanvas() {
+  const todayCard = document.querySelector('.today-card');
+  const old = todayCard.querySelector('canvas.weather-particles');
+  if (old) old.remove();
+
+  const canvas = document.createElement('canvas');
+  canvas.className = 'weather-particles';
+  canvas.setAttribute('aria-hidden', 'true');
+  todayCard.prepend(canvas);
+
+  _particleCanvas = canvas;
+  _particleCtx    = canvas.getContext('2d');
+  resizeParticleCanvas();
+}
+
+function resizeParticleCanvas() {
+  if (!_particleCanvas) return;
+  const rect = _particleCanvas.parentElement.getBoundingClientRect();
+  _particleCanvas.width  = rect.width * devicePixelRatio;
+  _particleCanvas.height = rect.height * devicePixelRatio;
+  _particleCtx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+}
+
+function spawnStars(count, w, h) {
+  for (let i = 0; i < count; i++) {
+    _particles.push({
+      type: 'star',
+      x: Math.random() * w,
+      y: Math.random() * h * 0.85,
+      r: 0.4 + Math.random() * 1.8,
+      maxOpacity: 0.4 + Math.random() * 0.6,
+      twinkleSpeed: 0.015 + Math.random() * 0.035,
+      twinklePhase: Math.random() * Math.PI * 2,
+    });
+  }
+}
+
+function startParticles(weatherBg, weatherCode, isNight) {
+  stopParticles();
+  initParticleCanvas();
+  _particleType = weatherBg;
+  _particleCode = weatherCode || 0;
+  _particleTime = 0;
+  _particles = [];
+
+  const w = _particleCanvas.width / devicePixelRatio;
+  const h = _particleCanvas.height / devicePixelRatio;
+
+  const isHeavyRain = [55, 57, 65, 67, 82].includes(_particleCode);
+  const isHeavySnow = [75, 86].includes(_particleCode);
+  const hasHail     = _particleCode === 96 || _particleCode === 99;
+
+  if (weatherBg === 'bg-rainy') {
+    // Drizzle (51-57): sparse, thin, slow | Rain: medium | Heavy: dense, fast, angled
+    const isDrizzle = _particleCode >= 51 && _particleCode <= 57;
+    const count = isDrizzle ? 30 : isHeavyRain ? 160 : 80;
+    const angle = isDrizzle ? 0 : isHeavyRain ? 0.35 : 0.15;
+    for (let i = 0; i < count; i++) {
+      _particles.push({
+        type: 'drop',
+        x: Math.random() * (w + 60) - 30,
+        y: Math.random() * h - h,
+        len:   isDrizzle ? (4 + Math.random() * 8) : isHeavyRain ? (14 + Math.random() * 22) : (8 + Math.random() * 16),
+        speed: isDrizzle ? (2 + Math.random() * 2) : isHeavyRain ? (8 + Math.random() * 10) : (4 + Math.random() * 6),
+        width: isDrizzle ? 0.6 : isHeavyRain ? 1.8 : 1.2,
+        angle: angle + (Math.random() - 0.5) * 0.05,
+        opacity: isDrizzle ? (0.08 + Math.random() * 0.15) : isHeavyRain ? (0.2 + Math.random() * 0.35) : (0.12 + Math.random() * 0.25),
+      });
+    }
+    // Splashes for medium + heavy rain
+    if (!isDrizzle) {
+      for (let i = 0; i < (isHeavyRain ? 12 : 5); i++) {
+        _particles.push({
+          type: 'splash',
+          x: Math.random() * w,
+          y: h - 5 + Math.random() * 5,
+          timer: Math.random() * 40,
+          interval: isHeavyRain ? (10 + Math.random() * 20) : (20 + Math.random() * 40),
+          opacity: 0,
+          radius: 0,
+        });
+      }
+    }
+  } else if (weatherBg === 'bg-snowy') {
+    // Night: stars visible through snowfall
+    if (isNight) spawnStars(isHeavySnow ? 15 : 30, w, h);
+    const count = isHeavySnow ? 100 : 40;
+    for (let i = 0; i < count; i++) {
+      _particles.push({
+        type: 'flake',
+        x: Math.random() * w,
+        y: Math.random() * h,
+        r: isHeavySnow ? (2 + Math.random() * 5) : (1 + Math.random() * 3),
+        speed: isHeavySnow ? (0.8 + Math.random() * 2) : (0.3 + Math.random() * 0.8),
+        drift: (Math.random() - 0.5) * (isHeavySnow ? 1.2 : 0.5),
+        wobbleAmp: 0.5 + Math.random() * 1.5,
+        wobbleSpeed: 0.02 + Math.random() * 0.03,
+        phase: Math.random() * Math.PI * 2,
+        opacity: isHeavySnow ? (0.5 + Math.random() * 0.5) : (0.2 + Math.random() * 0.4),
+      });
+    }
+  } else if (weatherBg === 'bg-sunny') {
+    if (isNight) {
+      // Clear night: stars + moon
+      spawnStars(60, w, h);
+      _particles.push({ type: 'moon' });
+    } else {
+      // Day: sun glow + rays + specks
+      _particles.push({ type: 'sun-glow' });
+      for (let i = 0; i < 10; i++) {
+        _particles.push({
+          type: 'ray',
+          angle: (Math.PI * 2 / 10) * i + (Math.random() - 0.5) * 0.15,
+          speed: 0.002 + Math.random() * 0.001,
+          len: 60 + Math.random() * 80,
+          width: 12 + Math.random() * 20,
+          opacity: 0.05 + Math.random() * 0.08,
+        });
+      }
+      for (let i = 0; i < 15; i++) {
+        _particles.push({
+          type: 'speck',
+          x: Math.random() * w,
+          y: Math.random() * h,
+          r: 1 + Math.random() * 2,
+          speedX: (Math.random() - 0.5) * 0.3,
+          speedY: -0.1 - Math.random() * 0.3,
+          opacity: 0,
+          maxOpacity: 0.15 + Math.random() * 0.25,
+          life: 0,
+          maxLife: 120 + Math.random() * 200,
+        });
+      }
+    }
+  } else if (weatherBg === 'bg-partly-cloudy') {
+    if (isNight) {
+      // Partly cloudy night: stars + moon, then clouds drift over them
+      spawnStars(30, w, h);
+      _particles.push({ type: 'moon' });
+    } else {
+      _particles.push({ type: 'sun-peek' });
+    }
+    for (let i = 0; i < 5; i++) {
+      _particles.push({
+        type: 'cloud',
+        x: -100 + Math.random() * (w + 200),
+        y: 10 + Math.random() * (h * 0.5),
+        w: 80 + Math.random() * 120,
+        h: 30 + Math.random() * 40,
+        speed: 0.15 + Math.random() * 0.25,
+        opacity: isNight ? (0.08 + Math.random() * 0.1) : (0.06 + Math.random() * 0.08),
+      });
+    }
+  } else if (weatherBg === 'bg-cloudy') {
+    // Dense layers of grey clouds rolling slowly
+    for (let i = 0; i < 8; i++) {
+      _particles.push({
+        type: 'cloud',
+        x: -150 + Math.random() * (w + 300),
+        y: Math.random() * h,
+        w: 100 + Math.random() * 160,
+        h: 40 + Math.random() * 50,
+        speed: 0.08 + Math.random() * 0.2,
+        opacity: 0.05 + Math.random() * 0.07,
+      });
+    }
+  } else if (weatherBg === 'bg-stormy') {
+    // Heavy rain + frequent lightning + optional hail
+    for (let i = 0; i < 140; i++) {
+      _particles.push({
+        type: 'drop',
+        x: Math.random() * (w + 80) - 40,
+        y: Math.random() * h - h,
+        len: 12 + Math.random() * 20,
+        speed: 7 + Math.random() * 9,
+        width: 1.4,
+        angle: 0.2 + (Math.random() - 0.5) * 0.1,
+        opacity: 0.15 + Math.random() * 0.25,
+      });
+    }
+    // Multiple lightning sources for more thunder
+    const boltCount = hasHail ? 3 : 2;
+    for (let i = 0; i < boltCount; i++) {
+      _particles.push({
+        type: 'lightning',
+        nextFlash: 800 + Math.random() * 2000,
+        flashing: 0,
+        flashFrames: 0,
+        boltX: 0,
+        boltSegments: [],
+        brightness: 0,
+      });
+    }
+    // Screen flash overlay
+    _particles.push({ type: 'flash-overlay', alpha: 0 });
+    // Hail particles for storm + hail
+    if (hasHail) {
+      for (let i = 0; i < 25; i++) {
+        _particles.push({
+          type: 'hail',
+          x: Math.random() * w,
+          y: Math.random() * -h,
+          r: 3 + Math.random() * 4,
+          speed: 5 + Math.random() * 7,
+          angle: 0.15 + (Math.random() - 0.5) * 0.1,
+          opacity: 0.4 + Math.random() * 0.4,
+          spin: Math.random() * Math.PI * 2,
+          spinSpeed: 0.05 + Math.random() * 0.1,
+          bouncing: false,
+          bounceY: 0,
+          bounceVel: 0,
+        });
+      }
+    }
+  } else if (weatherBg === 'bg-foggy') {
+    // Layered mist bands drifting at different speeds
+    for (let i = 0; i < 6; i++) {
+      _particles.push({
+        type: 'mist',
+        x: Math.random() * w,
+        y: h * 0.15 + Math.random() * h * 0.7,
+        w: 120 + Math.random() * 140,
+        h: 50 + Math.random() * 60,
+        speed: 0.1 + Math.random() * 0.25,
+        opacity: 0.04 + Math.random() * 0.06,
+      });
+    }
+    // Thin horizontal fog lines
+    for (let i = 0; i < 4; i++) {
+      _particles.push({
+        type: 'fog-line',
+        y: h * 0.2 + Math.random() * h * 0.6,
+        opacity: 0.03 + Math.random() * 0.04,
+        speed: 0.3 + Math.random() * 0.4,
+        offset: Math.random() * w,
+      });
+    }
+  }
+
+  tickParticles();
+}
+
+function stopParticles() {
+  if (_particleAnimId) {
+    cancelAnimationFrame(_particleAnimId);
+    _particleAnimId = null;
+  }
+  _particles = [];
+}
+
+function tickParticles() {
+  if (!_particleCanvas || !_particleCtx) return;
+
+  const ctx = _particleCtx;
+  const w   = _particleCanvas.width / devicePixelRatio;
+  const h   = _particleCanvas.height / devicePixelRatio;
+  ctx.clearRect(0, 0, w, h);
+  _particleTime++;
+
+  _particles.forEach(p => {
+    switch (p.type) {
+
+    // ---- RAIN DROP ----
+    case 'drop': {
+      const dx = Math.sin(p.angle) * p.len;
+      const dy = Math.cos(p.angle) * p.len;
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+      ctx.lineTo(p.x + dx, p.y + dy);
+      ctx.strokeStyle = `rgba(180, 210, 255, ${p.opacity})`;
+      ctx.lineWidth = p.width;
+      ctx.lineCap = 'round';
+      ctx.stroke();
+      p.y += p.speed;
+      p.x += Math.sin(p.angle) * p.speed * 0.4;
+      if (p.y > h + 10) { p.y = -p.len - Math.random() * 40; p.x = Math.random() * (w + 60) - 30; }
+      break;
+    }
+
+    // ---- RAIN SPLASH ----
+    case 'splash': {
+      p.timer--;
+      if (p.timer <= 0) {
+        p.timer = p.interval;
+        p.opacity = 0.4;
+        p.radius = 0;
+        p.x = Math.random() * w;
+      }
+      if (p.opacity > 0) {
+        p.radius += 0.8;
+        p.opacity -= 0.02;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(180, 210, 255, ${Math.max(0, p.opacity)})`;
+        ctx.lineWidth = 0.8;
+        ctx.stroke();
+      }
+      break;
+    }
+
+    // ---- SNOWFLAKE ----
+    case 'flake': {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255, 255, 255, ${p.opacity})`;
+      ctx.fill();
+      // Subtle inner glow for larger flakes
+      if (p.r > 2.5) {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r * 0.5, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255, 255, 255, ${p.opacity * 0.5})`;
+        ctx.fill();
+      }
+      p.y += p.speed;
+      p.x += p.drift + Math.sin(p.phase + _particleTime * p.wobbleSpeed) * p.wobbleAmp * 0.3;
+      if (p.y > h + p.r) { p.y = -p.r; p.x = Math.random() * w; }
+      if (p.x < -20) p.x = w + 20;
+      if (p.x > w + 20) p.x = -20;
+      break;
+    }
+
+    // ---- SUN GLOW (bright yellow sun on blue sky) ----
+    case 'sun-glow': {
+      const cx = w * 0.82;
+      const cy = h * 0.18;
+      const pulse = 1 + Math.sin(_particleTime * 0.02) * 0.08;
+      // Outermost warm haze
+      const g4 = ctx.createRadialGradient(cx, cy, 0, cx, cy, 140 * pulse);
+      g4.addColorStop(0, 'rgba(255, 240, 150, 0.15)');
+      g4.addColorStop(0.4, 'rgba(255, 220, 80, 0.06)');
+      g4.addColorStop(1, 'rgba(255, 200, 50, 0)');
+      ctx.fillStyle = g4;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 140 * pulse, 0, Math.PI * 2);
+      ctx.fill();
+      // Outer glow ring
+      const g3 = ctx.createRadialGradient(cx, cy, 15, cx, cy, 80 * pulse);
+      g3.addColorStop(0, 'rgba(255, 230, 100, 0.35)');
+      g3.addColorStop(0.5, 'rgba(255, 210, 60, 0.12)');
+      g3.addColorStop(1, 'rgba(255, 190, 40, 0)');
+      ctx.fillStyle = g3;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 80 * pulse, 0, Math.PI * 2);
+      ctx.fill();
+      // Solid bright sun disc
+      const g1 = ctx.createRadialGradient(cx, cy, 0, cx, cy, 28 * pulse);
+      g1.addColorStop(0, 'rgba(255, 255, 240, 0.95)');
+      g1.addColorStop(0.5, 'rgba(255, 240, 120, 0.8)');
+      g1.addColorStop(0.85, 'rgba(255, 210, 60, 0.5)');
+      g1.addColorStop(1, 'rgba(255, 190, 40, 0)');
+      ctx.fillStyle = g1;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 28 * pulse, 0, Math.PI * 2);
+      ctx.fill();
+      // Hot white core
+      const g2 = ctx.createRadialGradient(cx, cy, 0, cx, cy, 12 * pulse);
+      g2.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
+      g2.addColorStop(1, 'rgba(255, 250, 200, 0)');
+      ctx.fillStyle = g2;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 12 * pulse, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    }
+
+    // ---- SUN RAY ----
+    case 'ray': {
+      const cx = w * 0.82;
+      const cy = h * 0.15;
+      p.angle += p.speed;
+      const pulse = 1 + Math.sin(_particleTime * 0.015 + p.angle * 3) * 0.3;
+      const rayLen = p.len * pulse;
+      const x2 = cx + Math.cos(p.angle) * rayLen;
+      const y2 = cy + Math.sin(p.angle) * rayLen;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(x2, y2);
+      ctx.strokeStyle = `rgba(255, 230, 140, ${p.opacity * pulse})`;
+      ctx.lineWidth = p.width * pulse;
+      ctx.lineCap = 'round';
+      ctx.stroke();
+      break;
+    }
+
+    // ---- FLOATING LIGHT SPECK ----
+    case 'speck': {
+      p.life++;
+      const lifeRatio = p.life / p.maxLife;
+      p.opacity = lifeRatio < 0.2 ? (lifeRatio / 0.2) * p.maxOpacity
+                : lifeRatio > 0.8 ? ((1 - lifeRatio) / 0.2) * p.maxOpacity
+                : p.maxOpacity;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255, 240, 180, ${p.opacity})`;
+      ctx.fill();
+      p.x += p.speedX;
+      p.y += p.speedY;
+      if (p.life >= p.maxLife) {
+        p.x = Math.random() * w;
+        p.y = Math.random() * h;
+        p.life = 0;
+        p.maxLife = 120 + Math.random() * 200;
+      }
+      break;
+    }
+
+    // ---- SUN PEEK (smaller dimmer sun for partly cloudy) ----
+    case 'sun-peek': {
+      const cx = w * 0.8;
+      const cy = h * 0.2;
+      const pulse = 1 + Math.sin(_particleTime * 0.025) * 0.08;
+      // Outer haze
+      const g3 = ctx.createRadialGradient(cx, cy, 0, cx, cy, 70 * pulse);
+      g3.addColorStop(0, 'rgba(255, 230, 130, 0.12)');
+      g3.addColorStop(0.5, 'rgba(255, 210, 80, 0.04)');
+      g3.addColorStop(1, 'rgba(255, 200, 60, 0)');
+      ctx.fillStyle = g3;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 70 * pulse, 0, Math.PI * 2);
+      ctx.fill();
+      // Dimmer sun disc
+      const g1 = ctx.createRadialGradient(cx, cy, 0, cx, cy, 22 * pulse);
+      g1.addColorStop(0, 'rgba(255, 250, 220, 0.7)');
+      g1.addColorStop(0.5, 'rgba(255, 230, 100, 0.4)');
+      g1.addColorStop(1, 'rgba(255, 200, 60, 0)');
+      ctx.fillStyle = g1;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 22 * pulse, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    }
+
+    // ---- DRIFTING CLOUD (soft radial blobs) ----
+    case 'cloud': {
+      ctx.save();
+      const cx = p.x;
+      const cy = p.y;
+      // Draw cloud as cluster of soft radial-gradient circles
+      const puffs = [
+        { dx: 0,             dy: 0,             rx: p.w * 0.38, ry: p.w * 0.28 },
+        { dx: -p.w * 0.28,  dy: p.w * 0.04,    rx: p.w * 0.26, ry: p.w * 0.22 },
+        { dx: p.w * 0.26,   dy: p.w * 0.02,    rx: p.w * 0.3,  ry: p.w * 0.24 },
+        { dx: -p.w * 0.12,  dy: -p.w * 0.16,   rx: p.w * 0.22, ry: p.w * 0.2  },
+        { dx: p.w * 0.14,   dy: -p.w * 0.12,   rx: p.w * 0.2,  ry: p.w * 0.18 },
+        { dx: -p.w * 0.38,  dy: p.w * 0.08,    rx: p.w * 0.18, ry: p.w * 0.15 },
+        { dx: p.w * 0.36,   dy: p.w * 0.06,    rx: p.w * 0.2,  ry: p.w * 0.16 },
+      ];
+      puffs.forEach(pf => {
+        const px = cx + pf.dx;
+        const py = cy + pf.dy;
+        const r = Math.max(pf.rx, pf.ry);
+        const g = ctx.createRadialGradient(px, py, 0, px, py, r);
+        g.addColorStop(0, `rgba(230, 235, 245, ${p.opacity * 2.5})`);
+        g.addColorStop(0.4, `rgba(220, 228, 240, ${p.opacity * 1.8})`);
+        g.addColorStop(0.7, `rgba(210, 220, 235, ${p.opacity * 0.8})`);
+        g.addColorStop(1, 'rgba(200, 215, 235, 0)');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.ellipse(px, py, pf.rx, pf.ry, 0, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      ctx.restore();
+      p.x += p.speed;
+      if (p.x > w + p.w) p.x = -p.w;
+      break;
+    }
+
+    // ---- LIGHTNING ----
+    case 'lightning': {
+      p.nextFlash -= 16;
+      if (p.nextFlash <= 0) {
+        p.flashFrames = 6 + Math.floor(Math.random() * 4);
+        p.flashing = p.flashFrames;
+        p.nextFlash = 600 + Math.random() * 2500;
+        // Build bolt path
+        p.boltX = w * (0.15 + Math.random() * 0.7);
+        p.boltSegments = [];
+        let bY = 0;
+        let bX = p.boltX;
+        while (bY < h * 0.75) {
+          bY += 6 + Math.random() * 12;
+          bX += (Math.random() - 0.5) * 35;
+          p.boltSegments.push({ x: bX, y: bY });
+          // Branch with 20% chance
+          if (Math.random() < 0.2 && p.boltSegments.length > 2) {
+            const branchLen = 2 + Math.floor(Math.random() * 3);
+            let brX = bX, brY = bY;
+            const brDir = Math.random() < 0.5 ? -1 : 1;
+            for (let b = 0; b < branchLen; b++) {
+              brX += brDir * (5 + Math.random() * 15);
+              brY += 5 + Math.random() * 10;
+              p.boltSegments.push({ x: brX, y: brY, branch: true });
+            }
+            // Return to main bolt position
+            p.boltSegments.push({ x: bX, y: bY, jump: true });
+          }
+        }
+        p.brightness = 1;
+      }
+      if (p.flashing > 0) {
+        const fade = p.flashing / p.flashFrames;
+        // Draw bolt
+        ctx.beginPath();
+        ctx.moveTo(p.boltX, 0);
+        let prevJump = false;
+        p.boltSegments.forEach(seg => {
+          if (seg.jump || prevJump) {
+            ctx.moveTo(seg.x, seg.y);
+            prevJump = false;
+          } else {
+            ctx.lineTo(seg.x, seg.y);
+          }
+          if (seg.jump) prevJump = true;
+        });
+        // Main bolt
+        ctx.strokeStyle = `rgba(220, 225, 255, ${0.8 * fade})`;
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+        // Glow around bolt
+        ctx.strokeStyle = `rgba(180, 190, 255, ${0.3 * fade})`;
+        ctx.lineWidth = 6;
+        ctx.stroke();
+        p.flashing--;
+      }
+      break;
+    }
+
+    // ---- SCREEN FLASH OVERLAY ----
+    case 'flash-overlay': {
+      // Triggered by lightning flashes nearby
+      const lightnings = _particles.filter(lp => lp.type === 'lightning');
+      const anyFlashing = lightnings.some(lp => lp.flashing > lp.flashFrames - 2);
+      if (anyFlashing) p.alpha = 0.15;
+      if (p.alpha > 0) {
+        ctx.fillStyle = `rgba(200, 210, 255, ${p.alpha})`;
+        ctx.fillRect(0, 0, w, h);
+        p.alpha *= 0.8;
+        if (p.alpha < 0.005) p.alpha = 0;
+      }
+      break;
+    }
+
+    // ---- HAIL ----
+    case 'hail': {
+      if (!p.bouncing) {
+        // Falling
+        p.y += p.speed;
+        p.x += Math.sin(p.angle) * p.speed * 0.3;
+        p.spin += p.spinSpeed;
+        if (p.y >= h - 8) {
+          p.bouncing = true;
+          p.bounceVel = -(2 + Math.random() * 3);
+          p.bounceY = h - 8;
+        }
+      } else {
+        // Bouncing
+        p.bounceVel += 0.3;
+        p.bounceY += p.bounceVel;
+        p.y = p.bounceY;
+        p.x += 0.5;
+        if (p.bounceY >= h + 10) {
+          p.y = -p.r - Math.random() * 50;
+          p.x = Math.random() * w;
+          p.bouncing = false;
+        }
+      }
+      // Draw hail stone (irregular circle)
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.spin);
+      ctx.beginPath();
+      for (let a = 0; a < Math.PI * 2; a += 0.5) {
+        const rr = p.r * (0.85 + Math.sin(a * 3) * 0.15);
+        const hx = Math.cos(a) * rr;
+        const hy = Math.sin(a) * rr;
+        a === 0 ? ctx.moveTo(hx, hy) : ctx.lineTo(hx, hy);
+      }
+      ctx.closePath();
+      ctx.fillStyle = `rgba(220, 230, 245, ${p.opacity})`;
+      ctx.fill();
+      ctx.strokeStyle = `rgba(180, 200, 230, ${p.opacity * 0.5})`;
+      ctx.lineWidth = 0.5;
+      ctx.stroke();
+      // Highlight
+      ctx.beginPath();
+      ctx.arc(-p.r * 0.2, -p.r * 0.2, p.r * 0.35, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255, 255, 255, ${p.opacity * 0.6})`;
+      ctx.fill();
+      ctx.restore();
+      break;
+    }
+
+    // ---- FOG MIST BLOB ----
+    case 'mist': {
+      const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.w * 0.6);
+      g.addColorStop(0, `rgba(200, 210, 225, ${p.opacity})`);
+      g.addColorStop(1, 'rgba(200, 210, 225, 0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y, p.w * 0.6, p.h * 0.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      p.x += p.speed;
+      if (p.x > w + p.w) p.x = -p.w;
+      break;
+    }
+
+    // ---- FOG HORIZONTAL LINE ----
+    case 'fog-line': {
+      const waveX = Math.sin(_particleTime * 0.005 + p.offset) * 20;
+      ctx.beginPath();
+      ctx.moveTo(-20, p.y);
+      ctx.bezierCurveTo(w * 0.25, p.y - 8 + waveX, w * 0.75, p.y + 8 - waveX, w + 20, p.y);
+      ctx.strokeStyle = `rgba(200, 210, 225, ${p.opacity})`;
+      ctx.lineWidth = 25;
+      ctx.lineCap = 'round';
+      ctx.stroke();
+      p.y += Math.sin(_particleTime * 0.008 + p.offset) * 0.1;
+      break;
+    }
+
+    // ---- STAR ----
+    case 'star': {
+      const twinkle = 0.5 + 0.5 * Math.sin(_particleTime * p.twinkleSpeed + p.twinklePhase);
+      const alpha = 0.15 + twinkle * p.maxOpacity;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255, 250, 240, ${alpha})`;
+      ctx.fill();
+      // Glint cross on brighter stars
+      if (p.r > 1.1 && twinkle > 0.6) {
+        const glint = p.r * 3;
+        const ga = alpha * 0.5;
+        ctx.strokeStyle = `rgba(255, 250, 240, ${ga})`;
+        ctx.lineWidth = 0.5;
+        ctx.beginPath(); ctx.moveTo(p.x - glint, p.y); ctx.lineTo(p.x + glint, p.y); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(p.x, p.y - glint); ctx.lineTo(p.x, p.y + glint); ctx.stroke();
+      }
+      break;
+    }
+
+    // ---- MOON (crescent via even-odd fill) ----
+    case 'moon': {
+      const cx = w * 0.82;
+      const cy = h * 0.17;
+      const moonR = 20;
+      const pulse = 1 + Math.sin(_particleTime * 0.012) * 0.03;
+      // Outer silver haze
+      const gHaze = ctx.createRadialGradient(cx, cy, moonR, cx, cy, moonR * 3.8);
+      gHaze.addColorStop(0, 'rgba(200, 215, 255, 0.1)');
+      gHaze.addColorStop(0.4, 'rgba(190, 205, 255, 0.04)');
+      gHaze.addColorStop(1, 'rgba(180, 200, 255, 0)');
+      ctx.fillStyle = gHaze;
+      ctx.beginPath();
+      ctx.arc(cx, cy, moonR * 3.8 * pulse, 0, Math.PI * 2);
+      ctx.fill();
+      // Inner glow ring
+      const gGlow = ctx.createRadialGradient(cx, cy, moonR * 0.8, cx, cy, moonR * 2);
+      gGlow.addColorStop(0, 'rgba(215, 225, 255, 0.18)');
+      gGlow.addColorStop(1, 'rgba(200, 215, 255, 0)');
+      ctx.fillStyle = gGlow;
+      ctx.beginPath();
+      ctx.arc(cx, cy, moonR * 2 * pulse, 0, Math.PI * 2);
+      ctx.fill();
+      // Crescent using even-odd fill: outer circle - inner offset circle
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(cx, cy, moonR * pulse, 0, Math.PI * 2);           // full disc (CW)
+      ctx.arc(cx + moonR * 0.62, cy - moonR * 0.08,             // shadow disc (CW, same winding)
+        moonR * 0.86 * pulse, 0, Math.PI * 2);
+      const moonGrad = ctx.createRadialGradient(
+        cx - moonR * 0.2, cy - moonR * 0.25, 0, cx, cy, moonR * pulse
+      );
+      moonGrad.addColorStop(0, 'rgba(248, 252, 255, 0.96)');
+      moonGrad.addColorStop(0.6, 'rgba(225, 235, 255, 0.8)');
+      moonGrad.addColorStop(1, 'rgba(200, 218, 255, 0.5)');
+      ctx.fillStyle = moonGrad;
+      ctx.fill('evenodd');  // creates the crescent cutout
+      ctx.restore();
+      break;
+    }
+
+    } // switch
+  });
+
+  _particleAnimId = requestAnimationFrame(tickParticles);
+}
+
+// Resize observer for canvas
+const _particleRO = new ResizeObserver(() => resizeParticleCanvas());
 
 /* ===========================
    UNITS
@@ -863,6 +1668,151 @@ document.addEventListener('keydown', e => {
     compareSearchDropdown.hidden = true;
   }
 });
+
+/* ===========================
+   DEV PANEL
+   =========================== */
+(() => {
+  const toggle = document.getElementById('devToggle');
+  const panel  = document.getElementById('devPanel');
+  const close  = document.getElementById('devClose');
+  if (!toggle || !panel) return;
+
+  toggle.addEventListener('click', () => {
+    panel.hidden = !panel.hidden;
+  });
+  close.addEventListener('click', () => { panel.hidden = true; });
+
+  // Build mock weatherData + locationData for a given weather code and temp
+  function buildMockData(code, tempC) {
+    const today = new Date();
+    const toISO = (d) => d.toISOString().slice(0, 10);
+    const days = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(today); d.setDate(today.getDate() + i);
+      return toISO(d);
+    });
+    const hours = Array.from({ length: 168 }, (_, i) => {
+      const d = new Date(today); d.setHours(0, 0, 0, 0); d.setHours(i);
+      return d.toISOString().slice(0, 13) + ':00';
+    });
+
+    const dailyCodes = [code, code, 2, 0, code, 3, code];
+    const hourlyTemps = hours.map((_, i) => tempC + Math.sin(i / 6) * 4 + (Math.random() - 0.5) * 2);
+
+    return {
+      weather: {
+        current: {
+          temperature_2m: tempC,
+          apparent_temperature: tempC - 2,
+          relative_humidity_2m: 55 + Math.round(Math.random() * 30),
+          wind_speed_10m: 8 + Math.round(Math.random() * 20),
+          precipitation: code >= 51 && code <= 82 ? +(1 + Math.random() * 8).toFixed(1) : 0,
+          weather_code: code,
+          surface_pressure: 1005 + Math.round(Math.random() * 20),
+        },
+        daily: {
+          time: days,
+          temperature_2m_max: days.map((_, i) => tempC + 3 - i * 0.5 + Math.random() * 2),
+          temperature_2m_min: days.map((_, i) => tempC - 5 + Math.random() * 2),
+          weather_code: dailyCodes,
+          precipitation_sum: dailyCodes.map(c => c >= 51 && c <= 82 ? +(Math.random() * 10).toFixed(1) : 0),
+          sunrise: days.map(d => d + 'T06:' + String(15 + Math.floor(Math.random() * 30)).padStart(2, '0')),
+          sunset:  days.map(d => d + 'T18:' + String(30 + Math.floor(Math.random() * 30)).padStart(2, '0')),
+          uv_index_max: days.map(() => +(1 + Math.random() * 10).toFixed(1)),
+        },
+        hourly: {
+          time: hours,
+          temperature_2m: hourlyTemps,
+          weather_code: hours.map(() => dailyCodes[Math.floor(Math.random() * dailyCodes.length)]),
+          uv_index: hours.map(() => +(Math.random() * 11).toFixed(1)),
+          visibility: hours.map(() => Math.round(5000 + Math.random() * 30000)),
+        },
+      },
+      location: {
+        name: 'Dev Preview',
+        country: 'Test Mode',
+        admin1: '',
+        latitude: 51.5,
+        longitude: -0.12,
+      }
+    };
+  }
+
+  // --- Weather type buttons ---
+  const weatherGrid = document.getElementById('devWeatherGrid');
+  let currentDevCode = null;
+  let currentDevTemp = 22;
+
+  function applyMock(code, temp) {
+    const mock = buildMockData(code, temp);
+    weatherData  = mock.weather;
+    locationData = mock.location;
+    selectedDayIndex = 0;
+    setState('loaded');
+    renderWeather();
+
+    // Also highlight state button
+    stateGrid.querySelectorAll('button').forEach(b => {
+      b.classList.toggle('dev-active', b.dataset.state === 'loaded');
+    });
+
+    // Highlight active button
+    weatherGrid.querySelectorAll('button').forEach(b => {
+      b.classList.toggle('dev-active', +b.dataset.code === code);
+    });
+  }
+
+  weatherGrid.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-code]');
+    if (!btn) return;
+    currentDevCode = +btn.dataset.code;
+    applyMock(currentDevCode, currentDevTemp);
+  });
+
+  // --- App state buttons ---
+  const stateGrid = document.getElementById('devStateGrid');
+  stateGrid.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-state]');
+    if (!btn) return;
+    const state = btn.dataset.state;
+
+    stateGrid.querySelectorAll('button').forEach(b => {
+      b.classList.toggle('dev-active', b.dataset.state === state);
+    });
+
+    if (state === 'loaded' && currentDevCode != null) {
+      applyMock(currentDevCode, currentDevTemp);
+    } else {
+      setState(state);
+    }
+  });
+
+  // --- Temperature slider ---
+  const tempSlider = document.getElementById('devTemp');
+  const tempLabel  = document.getElementById('devTempLabel');
+
+  // --- Night toggle ---
+  const nightBtn = document.getElementById('devNightToggle');
+  if (nightBtn) {
+    nightBtn.addEventListener('click', () => {
+      _devNightOverride = _devNightOverride === true ? false : true;
+      const forcing = _devNightOverride === true;
+      nightBtn.classList.toggle('dev-active', forcing);
+      nightBtn.textContent = forcing ? '🌙 Night' : '☀️ Day';
+      if (currentDevCode != null) applyMock(currentDevCode, currentDevTemp);
+    });
+  }
+
+  function cToF(c) { return Math.round(c * 9 / 5 + 32); }
+  tempLabel.textContent = `${cToF(currentDevTemp)}°F`;
+  tempSlider.addEventListener('input', () => {
+    currentDevTemp = +tempSlider.value;
+    tempLabel.textContent = `${cToF(currentDevTemp)}°F`;
+    if (currentDevCode != null) {
+      applyMock(currentDevCode, currentDevTemp);
+    }
+  });
+})();
 
 /* ===========================
    INIT
