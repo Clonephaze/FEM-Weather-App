@@ -140,6 +140,7 @@ function cvtPressure(hpa) {
     return isImperial() ? (hpa * 0.02953).toFixed(2) + ' inHg' : Math.round(hpa) + ' hPa';
 }
 function uvLabel(idx) {
+    // idiomatic JS pattern for catching both null and undefined. Changing to === would break them.
     if (idx == null) return '—';
     if (idx <= 2) return `${idx} Low`;
     if (idx <= 5) return `${idx} Mod`;
@@ -502,7 +503,7 @@ function renderDailyForecast(daily) {
 function renderDayPicker(daily) {
     dayPickerMenu.innerHTML = daily.time.map((dateStr, i) => {
         const name = formatDayName(dateStr, 'long');
-        return `<button class="day-option${i === selectedDayIndex ? ' active' : ''}" role="option" data-idx="${i}">${name}</button>`;
+        return `<button type="button" class="day-option${i === selectedDayIndex ? ' active' : ''}" role="option" data-idx="${i}">${name}</button>`;
     }).join('');
     dayPickerLabel.textContent = formatDayName(daily.time[selectedDayIndex], 'long');
 
@@ -601,7 +602,6 @@ let _particleCanvas = null;
 let _particleCtx = null;
 let _particleAnimId = null;
 let _particles = [];
-let _particleType = '';
 let _particleCode = 0;
 let _particleTime = 0;
 
@@ -645,7 +645,6 @@ function spawnStars(count, w, h) {
 function startParticles(weatherBg, weatherCode, isNight) {
     stopParticles();
     initParticleCanvas();
-    _particleType = weatherBg;
     _particleCode = weatherCode || 0;
     _particleTime = 0;
     _particles = [];
@@ -1351,8 +1350,8 @@ function renderFavoritesRow() {
         const label = [f.name, f.country].filter(Boolean).join(', ');
         return `
       <div class="fav-chip">
-        <button class="fav-chip-name" data-idx="${i}">${escapeHtml(label)}</button>
-        <button class="fav-chip-remove" data-lat="${f.latitude}" data-lon="${f.longitude}" aria-label="Remove ${escapeHtml(f.name)} from favorites">×</button>
+        <button type="button" class="fav-chip-name" data-idx="${i}">${escapeHtml(label)}</button>
+        <button type="button" class="fav-chip-remove" data-lat="${f.latitude}" data-lon="${f.longitude}" aria-label="Remove ${escapeHtml(f.name)} from favorites">×</button>
       </div>`;
     }).join('');
 
@@ -1376,7 +1375,7 @@ function renderFavoritesRow() {
    VOICE SEARCH
    =========================== */
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-let _voiceSupported = !!SpeechRecognition;
+const _voiceSupported = !!SpeechRecognition;
 
 if (_voiceSupported) {
     voiceBtn.hidden = false;
@@ -1453,7 +1452,7 @@ function renderCompareView() {
             <strong class="compare-city">${escapeHtml([loc.name, loc.country].filter(Boolean).join(', '))}</strong>
             <span class="compare-date">${formatCardDate(daily.time[0])}</span>
           </div>
-          <button class="compare-remove-btn" data-idx="${idx}" aria-label="Remove ${escapeHtml(loc.name)} from comparison">×</button>
+          <button type="button" class="compare-remove-btn" data-idx="${idx}" aria-label="Remove ${escapeHtml(loc.name)} from comparison">×</button>
         </div>
         <div class="compare-weather-row">
           <img src="./assets/images/${info.icon}" alt="${escapeHtml(info.label)}" width="56" height="56">
@@ -1547,6 +1546,7 @@ function hideDayPicker() { dayPickerMenu.hidden = true; dayPickerBtn.setAttribut
    SECURITY HELPER
    =========================== */
 function escapeHtml(str) {
+    // idiomatic JS pattern for catching both null and undefined. Changing to === would break them.
     if (str == null) return '';
     return String(str)
         .replace(/&/g, '&amp;')
@@ -1559,10 +1559,12 @@ function escapeHtml(str) {
 /* ===========================
    EVENT LISTENERS
    =========================== */
-searchBtn.addEventListener('click', performSearch);
+searchBtn.closest('form').addEventListener('submit', e => {
+    e.preventDefault();
+    performSearch();
+});
 searchInput.addEventListener('keydown', e => {
-    if (e.key === 'Enter') performSearch();
-    else if (e.key === 'Escape') hideSearchDropdown();
+    if (e.key === 'Escape') hideSearchDropdown();
     else if (e.key === 'ArrowDown') searchDropdown.querySelector('[tabindex="0"]')?.focus();
 });
 searchInput.addEventListener('input', () => { if (!searchInput.value.trim()) hideSearchDropdown(); });
@@ -1598,10 +1600,10 @@ compareSearchInput.addEventListener('keydown', e => { if (e.key === 'Enter') per
 compareSearchInput.addEventListener('input', () => { if (!compareSearchInput.value.trim()) compareSearchDropdown.hidden = true; });
 
 document.addEventListener('click', e => {
-    if (!$('unitsContainer').contains(e.target)) hideUnitsPanel();
-    if (!$('dayPickerContainer').contains(e.target)) hideDayPicker();
-    if (!document.querySelector('.search-bar').contains(e.target)) hideSearchDropdown();
-    if (!$('compareAddRow').contains(e.target)) compareSearchDropdown.hidden = true;
+    if (!$('unitsContainer')?.contains(e.target)) hideUnitsPanel();
+    if (!$('dayPickerContainer')?.contains(e.target)) hideDayPicker();
+    if (!document.querySelector('.search-bar')?.contains(e.target)) hideSearchDropdown();
+    if (!$('compareAddRow')?.contains(e.target)) compareSearchDropdown.hidden = true;
 });
 
 document.addEventListener('keydown', e => {

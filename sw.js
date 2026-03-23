@@ -3,7 +3,7 @@
    =========================== */
 
 // Bump on each deploy to bust stale cached assets
-const CACHE_NAME = 'wx-cache-v2';
+const CACHE_NAME = 'wx-cache-v3';
 
 const STATIC_ASSETS = [
     './',
