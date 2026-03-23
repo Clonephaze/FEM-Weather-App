@@ -48,7 +48,7 @@ All nine suggested extras were implemented:
 
 ### Links
 
-- Solution URL: [Frontend Mentor](https://www.frontendmentor.io/solutions/animated-forecasts-pwa-geo-loc-favs-voice-search-and-more-xvPsJWKPLs)
+- Solution URL: [Frontend Mentor](https://www.frontendmentor.io/solutions/animated-forcasts-pwa-geo-loc-favs-voice-search-and-more-wvrGJ_s8bN)
 - Live Site URL: [https://clonephaze.github.io/FEM-Weather-App/](https://clonephaze.github.io/FEM-Weather-App/)
 
 ## My process
