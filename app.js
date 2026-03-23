@@ -197,7 +197,7 @@ function setState(state) {
     sunRow.hidden       = true;
     renderSkeletons();
   } else if (state === 'loaded') {
-    todayLoading.hidden = false; // keep hidden until renderWeather() shows todayData
+    todayLoading.hidden = true;
     todayData.hidden    = false;
     compareBtn.hidden   = false;
   }
